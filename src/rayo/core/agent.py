@@ -175,9 +175,25 @@ class RayoAgent:
         Returns:
             Tool execution result as a string, or None if not a tool call.
         """
+        # Extract JSON from markdown code blocks if present
+        json_text = response.strip()
+        
+        # Check for markdown code blocks
+        if "```json" in json_text or "```" in json_text:
+            # Extract content between ```json and ``` or just ``` and ```
+            import re
+            # Try ```json first
+            match = re.search(r'```json\s*\n(.*?)\n```', json_text, re.DOTALL)
+            if not match:
+                # Try just ```
+                match = re.search(r'```\s*\n(.*?)\n```', json_text, re.DOTALL)
+            
+            if match:
+                json_text = match.group(1).strip()
+        
         # Try to parse as JSON
         try:
-            data = json.loads(response.strip())
+            data = json.loads(json_text)
         except json.JSONDecodeError:
             # Not a tool call, just a normal response
             return None
@@ -191,7 +207,7 @@ class RayoAgent:
         reasoning = data.get("reasoning", "No reasoning provided")
 
         # Display reasoning
-        console.print(f"\n[cyan]🤖 Agent reasoning:[/cyan] {reasoning}\n")
+        console.print(f"\n[cyan]🤖 {reasoning}[/cyan]\n")
 
         # Get the tool
         tool = self.tools.get(tool_name)
