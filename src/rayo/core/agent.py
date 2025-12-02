@@ -47,6 +47,9 @@ class RayoAgent:
         self.config = config
         self.llm = LLMClient(config)
         self.conversation_history: List[Dict[str, str]] = []
+        self.custom_prompt_path = custom_prompt_path
+        self.message_count = 0  # Track conversation length
+        
         self.tools: Dict[str, Tool] = {
             "list_files": ListFilesTool(),
             "read_file": ReadFileTool(),
@@ -54,11 +57,18 @@ class RayoAgent:
             "run_bash": RunBashTool(),
         }
 
-        # Load system prompt from file
+        # Load initial system prompt (lightweight for first interaction)
         try:
-            system_prompt = load_system_prompt(custom_prompt_path)
+            from rayo.prompts.dynamic import load_dynamic_prompt
+            
+            system_prompt = load_dynamic_prompt(
+                custom_prompt_path=custom_prompt_path,
+                is_first_message=True,
+                using_tools=False,
+                max_tokens=2000  # Limit to ~2000 tokens for simple queries
+            )
         except Exception as e:
-            console.print(f"[yellow]⚠ Warning: Failed to load system prompt: {e}[/yellow]")
+            console.print(f"[yellow]⚠ Warning: Failed to load dynamic prompt: {e}[/yellow]")
             console.print("[dim]Using fallback prompt...[/dim]")
             system_prompt = "You are Rayo, an AI coding assistant. Help users with their coding tasks."
 
@@ -78,6 +88,8 @@ class RayoAgent:
         Returns:
             The agent's response as a string.
         """
+        self.message_count += 1
+        
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -96,7 +108,10 @@ class RayoAgent:
         tool_result = self._try_execute_tool(response)
 
         if tool_result is not None:
-            # Tool was executed, add result to history
+            # Tool was executed - expand prompt context for next interaction
+            self._update_prompt_context(using_tools=True)
+            
+            # Add result to history
             self.conversation_history.append({
                 "role": "assistant",
                 "content": response,
@@ -125,6 +140,30 @@ class RayoAgent:
                 "content": response,
             })
             return response
+    
+    def _update_prompt_context(self, using_tools: bool = False) -> None:
+        """
+        Update the system prompt with expanded context when needed.
+        
+        Args:
+            using_tools: Whether tools are being used
+        """
+        try:
+            from rayo.prompts.dynamic import load_dynamic_prompt
+            
+            # Load expanded prompt
+            expanded_prompt = load_dynamic_prompt(
+                custom_prompt_path=self.custom_prompt_path,
+                is_first_message=False,
+                using_tools=using_tools,
+                max_tokens=4000  # Allow more context when using tools
+            )
+            
+            # Update system message
+            self.conversation_history[0]["content"] = expanded_prompt
+        except Exception:
+            # Silently fail - keep existing prompt
+            pass
 
     def _try_execute_tool(self, response: str) -> Optional[str]:
         """
